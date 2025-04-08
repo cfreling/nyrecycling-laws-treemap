@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .tooltip {
+            position: absolute;
+            padding: 8px;
+            background: white;
+            border: 1px solid #aaa;
+            pointer-events: none;
+            font-size: 13px;
+            line-height: 1.4em;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+
+        .region-border {
+            stroke: #004d40;
+            stroke-width: 3px;
+            fill: none;
+        }
+
+        .node {
+            cursor: pointer;
+        }
+
+        .label-text {
+            font-size: 10px;
+            color: white;
+            overflow: hidden;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div id="chart"></div>
+
+    <script>
+        d3.csv("lawsMap.csv").then(data => {
+            const width = 1200;
+            const height = 800;
+
+            const themes = [
+                { name: "Required Recyclables", field: "%Req" },
+                { name: "Disposal Ban Language", field: "%Dis" },
+                { name: "Municipal Recycling", field: "%Muni" },
+                { name: "Hauler Recycling", field: "%Haul" },
+                { name: "Hauler Permitting", field: "%Perm" },
+                { name: "Enforcement", field: "%Enfo" },
+                { name: "Residential", field: "%Res" },
+                { name: "Commercial", field: "%Comm" },
+                { name: "Multi-Family", field: "%MF" },
+                { name: "Targets/Rates", field: "%Rate" }
+            ];
+
+            const regions = data.filter(d => d.Region && d.Region.trim() !== "" && d.Region !== "Total");
+
+            const root = {
+                name: "All Laws",
+                children: regions.map(region => {
+                    const totalLaws = +region["Number of Laws Searched"];
+                    return {
+                        name: region.Region,
+                        totalLaws,
+                        children: themes
+                            .map(theme => {
+                                const raw = region[theme.field];
+                                if (!raw || raw === "0%") return null;
+                                const percentage = parseFloat(raw.replace('%', ''));
+                                const themeLaws = Math.round((percentage / 100) * totalLaws);
+                                return {
+                                    name: theme.name,
+                                    value: themeLaws,
+                                    percentage,
+                                    theme: theme.name,
+                                    region: region.Region,
+                                    totalLaws,
+                                    description: "Description to be added"
+                                };
+                            })
+                            .filter(d => d !== null)
+                    };
+                })
+            };
+
+            const hierarchy = d3.hierarchy(root)
+                .sum(d => d.value)
+                .sort((a, b) => b.value - a.value);
+
+            const treemap = d3.treemap()
+                .size([width, height])
+                .paddingInner(1)
+                .round(true);
+
+            treemap(hierarchy);
+
+            const svg = d3.select("#chart")
+                .append("svg")
+                .attr("width", width)
+                .attr("height", height);
+
+            const g = svg.append("g");
+
+            const color = d3.scaleOrdinal(d3.schemeCategory10);
+            const tooltip = d3.select("body").append("div")
+                .attr("class", "tooltip")
+                .style("opacity", 0);
+
+            render(hierarchy);
+
+            function render(rootNode) {
+                g.selectAll("*").remove();
+
+                const nodes = g.selectAll("g")
+		    .data(rootNode.children)
+		    .enter().append("g")
+		    .attr("transform", d => `translate(${d.x0},${d.y0})`)
+		    .attr("class", "node")
+		    .on("click", (event, d) => {
+		        if (d.children) {
+		            render(d);
+		        } else if (d.parent) {
+		            render(d.parent.parent || d.parent);
+		        }
+		    })
+		    .on("mouseover", showTooltip)
+		    .on("mouseout", hideTooltip);
+
+		if (rootNode.depth === 1) {
+		    nodes.append("rect")
+		        .attr("class", "region-border")
+		        .attr("width", d => d.x1 - d.x0)
+		        .attr("height", d => d.y1 - d.y0);
+		}
+
+		nodes.append("rect")
+		    .attr("width", d => d.x1 - d.x0)
+		    .attr("height", d => d.y1 - d.y0)
+		    .attr("fill", d => d.children ? "#004d40" : color(d.data.name));
+
+		nodes.append("foreignObject")
+		    .attr("x", 2)
+		    .attr("y", 2)
+		    .attr("width", d => Math.max(0, d.x1 - d.x0 - 4))
+		    .attr("height", d => Math.max(0, d.y1 - d.y0 - 4))
+		    .style("pointer-events", "none")
+		    .append("xhtml:div")
+		    .attr("class", "label-text")
+		    .style("color", d => d.children ? "white" : "white")
+		    .style("font-weight", d => d.children ? "bold" : "normal")
+		    .html(d => d.data.name);
+
+            }
+
+            function showTooltip(event, d) {
+                tooltip.transition().duration(200).style("opacity", 1);
+                tooltip.html(`
+                    <strong>Region:</strong> ${d.data.region || d.data.name}<br/>
+                    <strong>Theme:</strong> ${d.data.theme || "N/A"}<br/>
+                    <strong>Percentage:</strong> ${d.data.percentage || "N/A"}%<br/>
+                    <strong>Number of Laws:</strong> ${d.data.value || "N/A"}<br/>
+                    <strong>Description:</strong> ${d.data.description || ""}
+                `)
+                .style("left", `${event.pageX + 10}px`)
+                .style("top", `${event.pageY - 30}px`);
+            }
+
+            function hideTooltip() {
+                tooltip.transition().duration(200).style("opacity", 0);
+            }
+        });
+    </script>
+</body>
+</html>
